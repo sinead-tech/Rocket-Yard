@@ -214,7 +214,9 @@ const MONTH_FULL_LABELS = MONTH_META.map(m => m.short);
 const NAVY='#000000', GOLD='#3369FF', LINE='#E3E5E9', TEAL='#3D7A6E', PLUM='#7A4B6B', SLATE='#4C5C74', RUST='#A85A3A';
 const MIX_COLORS = [NAVY, GOLD, TEAL, PLUM, SLATE, RUST];
 let chartRegistry = {};
-const state = { viewIdx: 7, compareIdx: 6 };
+const state = { viewIdx: 7, compareIdx: null };
+function hasCompare() { return state.compareIdx !== null; }
+function periodPhrase() { return hasCompare() ? MONTH_META[state.viewIdx].full + ' versus ' + MONTH_META[state.compareIdx].full : MONTH_META[state.viewIdx].full; }
 
 // ---------------- formatting helpers ----------------
 function fmtNum(v, fmt) {
@@ -293,8 +295,10 @@ function liveRows(section, group) {
   const rawKeys = RAW_KEYS[section][group];
   return meta.map((m, i) => {
     const series = fullSeriesFor(section, group, rawKeys[i]);
-    const curr = series[state.viewIdx], comp = series[state.compareIdx];
-    return { label: m.label, fmt: m.fmt, higher_is_better: m.higher_is_better, current: curr, compare: comp, pct: computePct(curr, comp), series, rawKey: rawKeys[i] };
+    const curr = series[state.viewIdx];
+    const comp = hasCompare() ? series[state.compareIdx] : null;
+    const pct = hasCompare() ? computePct(curr, comp) : null;
+    return { label: m.label, fmt: m.fmt, higher_is_better: m.higher_is_better, current: curr, compare: comp, pct, series, rawKey: rawKeys[i] };
   });
 }
 function sumAcrossGroups(section, groups, labelRegex, fmt, higherIsBetter) {
@@ -311,17 +315,24 @@ function sumAcrossGroups(section, groups, labelRegex, fmt, higherIsBetter) {
 
 // ---------------- generic building blocks ----------------
 function tileEl(row, label, sparkId) {
-  const cls = deltaClass(row.pct, row.higher_is_better);
+  const deltaHtml = hasCompare() ? '<div class="delta ' + deltaClass(row.pct, row.higher_is_better) + '">' + deltaText(row.pct) + '</div>' : '';
   const sparkData = (row.series || []).slice(Math.max(0, state.viewIdx - 5), state.viewIdx + 1).map(v => v === null || v === undefined ? 0 : v);
   const div = document.createElement('div');
   div.className = 'tile';
-  div.innerHTML = '<div class="label">' + (label || row.label) + '</div><div class="value nums">' + fmtNum(row.current, row.fmt) + '</div><div class="delta ' + cls + '">' + deltaText(row.pct) + '</div>' + (sparkId ? '<canvas class="spark" id="' + sparkId + '"></canvas>' : '');
+  div.innerHTML = '<div class="label">' + (label || row.label) + '</div><div class="value nums">' + fmtNum(row.current, row.fmt) + '</div>' + deltaHtml + (sparkId ? '<canvas class="spark" id="' + sparkId + '"></canvas>' : '');
   div._sparkData = sparkData;
   return div;
 }
 
 function buildMetricTable(rows) {
-  const compLabel = MONTH_META[state.compareIdx].full, viewLabel = MONTH_META[state.viewIdx].full;
+  const viewLabel = MONTH_META[state.viewIdx].full;
+  if (!hasCompare()) {
+    let html = '<div class="table-scroll"><table class="metrics"><thead><tr><th>Metric</th><th>' + viewLabel + '</th></tr></thead><tbody>';
+    rows.forEach(r => { html += '<tr><td>' + r.label + '</td><td class="current nums">' + fmtNum(r.current,r.fmt) + '</td></tr>'; });
+    html += '</tbody></table></div>';
+    return html;
+  }
+  const compLabel = MONTH_META[state.compareIdx].full;
   let html = '<div class="table-scroll"><table class="metrics"><thead><tr><th>Metric</th><th>' + compLabel + '</th><th>' + viewLabel + '</th><th>Change</th></tr></thead><tbody>';
   rows.forEach(r => {
     const cls = deltaClass(r.pct, r.higher_is_better);
@@ -516,9 +527,9 @@ function initMonthSelectors() {
   const viewSel = document.getElementById('view-month');
   const compSel = document.getElementById('compare-month');
   viewSel.innerHTML = MONTH_META.map((m, i) => '<option value="' + i + '"' + (i===state.viewIdx?' selected':'') + '>' + m.full + '</option>').join('');
-  compSel.innerHTML = MONTH_META.map((m, i) => '<option value="' + i + '"' + (i===state.compareIdx?' selected':'') + '>' + m.full + '</option>').join('');
+  compSel.innerHTML = '<option value="" selected>None</option>' + MONTH_META.map((m, i) => '<option value="' + i + '">' + m.full + '</option>').join('');
   viewSel.addEventListener('change', () => { state.viewIdx = Number(viewSel.value); render(); });
-  compSel.addEventListener('change', () => { state.compareIdx = Number(compSel.value); render(); });
+  compSel.addEventListener('change', () => { state.compareIdx = compSel.value === '' ? null : Number(compSel.value); render(); });
 }
 
 // ---------------- page renderers ----------------
@@ -602,7 +613,7 @@ function renderPaidPlatform(root, platform) {
     return;
   }
   const rows = liveRows('paid', platform);
-  pageHeader(root, ['Performance Marketing', platform], title, 'Paid media performance for ' + MONTH_META[state.viewIdx].full + ' versus ' + MONTH_META[state.compareIdx].full + '.');
+  pageHeader(root, ['Performance Marketing', platform], title, 'Paid media performance for ' + periodPhrase() + '.');
   const tiles = tilesGrid(rows);
   root.appendChild(tiles);
   root.insertAdjacentHTML('beforeend', insightBox(rows));
@@ -732,7 +743,7 @@ function render() {
   destroyAllCharts();
   renderNav(route);
   document.getElementById('view-month').value = state.viewIdx;
-  document.getElementById('compare-month').value = state.compareIdx;
+  document.getElementById('compare-month').value = state.compareIdx === null ? '' : state.compareIdx;
   const root = document.getElementById('main-content');
   root.innerHTML = '';
   const scrollY = window.scrollY;
